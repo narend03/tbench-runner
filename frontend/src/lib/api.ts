@@ -164,7 +164,7 @@ export async function executeTaskAsync(
   timeoutSeconds: number = 1200
 ): Promise<{ message: string; task_id: number; runs_queued: number; status: string; poll_url: string }> {
   const params = new URLSearchParams({
-    openai_api_key: openaiApiKey,
+    openrouter_api_key: openaiApiKey,
     timeout_seconds: timeoutSeconds.toString(),
   });
   const response = await api.post(`/api/tasks/${taskId}/execute-async?${params}`);

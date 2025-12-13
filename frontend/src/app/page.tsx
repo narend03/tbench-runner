@@ -51,14 +51,14 @@ export default function Home() {
 
   // Load API key from localStorage
   useEffect(() => {
-    const savedKey = localStorage.getItem('openai_api_key');
+    const savedKey = localStorage.getItem('openrouter_api_key');
     if (savedKey) setApiKey(savedKey);
   }, []);
 
   // Save API key to localStorage
   const handleApiKeyChange = (value: string) => {
     setApiKey(value);
-    localStorage.setItem('openai_api_key', value);
+    localStorage.setItem('openrouter_api_key', value);
   };
 
   return (
@@ -116,7 +116,7 @@ export default function Home() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-terminal-muted">
               <Key className="w-4 h-4" />
-              <span className="text-sm font-medium">OpenAI API Key</span>
+              <span className="text-sm font-medium">OpenRouter API Key</span>
             </div>
             <div className="flex-1 relative">
               <input
@@ -134,7 +134,7 @@ export default function Home() {
               </button>
             </div>
             <span className="text-xs text-terminal-muted">
-              {apiKey ? '✓ Key saved' : 'Required for LLM agents'}
+              {apiKey ? '✓ Key saved' : 'Required for LLM agents (OpenRouter)'}
             </span>
           </div>
         </motion.div>

@@ -1,0 +1,49 @@
+# TBench Runner Celery Worker
+# This worker needs Docker access to run Harbor tasks
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+ENV OPENAI_API_BASE=https://api.openai.com/v1
+
+# Install system dependencies including Docker CLI
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pipx and harbor
+RUN pip install --no-cache-dir pipx \
+    && pipx install harbor-bench \
+    && pipx ensurepath
+
+# Add pipx binaries to PATH
+ENV PATH="/root/.local/bin:$PATH"
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first for caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create directories
+RUN mkdir -p uploads jobs
+
+# Default command - Celery worker
+CMD ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--concurrency=4", "-Q", "celery,harbor"]
+

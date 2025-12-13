@@ -11,11 +11,12 @@ class Settings(BaseSettings):
     
     # Application
     app_name: str = "TBench Runner"
+    environment: str = "development"  # development, staging, production
     debug: bool = False
     host: str = "0.0.0.0"
     port: int = 8000
     
-    # Database
+    # Database - PostgreSQL for production, SQLite for dev
     database_url: str = "sqlite:///./tbench_runner.db"
     
     # Redis
@@ -25,10 +26,17 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/0"
     
-    # File storage
+    # File storage - local for dev, S3 for production
+    storage_backend: str = "local"  # "local" or "s3"
     upload_dir: str = "./uploads"
     jobs_dir: str = "./jobs"
     max_upload_size: int = 100 * 1024 * 1024  # 100MB
+    
+    # AWS S3 (for production)
+    aws_region: str = "us-east-1"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    s3_bucket_name: str = ""
     
     # Harbor settings
     harbor_timeout_multiplier: float = 1.0
@@ -36,20 +44,34 @@ class Settings(BaseSettings):
     harbor_default_env: str = "docker"
     harbor_n_concurrent: int = 4
     
-    # OpenAI API (required for LLM execution)
-    openai_api_key: str = ""
-    openai_api_base: str = "https://api.openai.com/v1"
+    # OpenRouter API (required for LLM execution)
+    openrouter_api_key: str = ""
+    openrouter_api_base: str = "https://openrouter.ai/api/v1"
     
     # Default model
-    default_model: str = "openai/gpt-5"
+    default_model: str = "openai/gpt-5.2"
     
     # Task limits
     max_runs_per_task: int = 10
     max_concurrent_runs: int = 600  # 15 users x 5 tasks x 10 runs
     
+    # CORS - update for production
+    cors_origins: str = "*"
+    
+    # Frontend URL
+    frontend_url: str = "http://localhost:3000"
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+    
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+    
+    @property
+    def use_s3(self) -> bool:
+        return self.storage_backend == "s3" and self.s3_bucket_name
 
 
 @lru_cache()
@@ -58,10 +80,10 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Available models for selection
+# Available models for selection (via OpenRouter)
 AVAILABLE_MODELS = [
+    {"id": "openai/gpt-5.2", "name": "GPT-5.2 (Recommended)", "provider": "OpenAI"},
     {"id": "openai/gpt-5", "name": "GPT-5", "provider": "OpenAI"},
-    {"id": "openai/gpt-5.2", "name": "GPT-5.2 (Latest)", "provider": "OpenAI"},
     {"id": "openai/gpt-5-mini", "name": "GPT-5 Mini", "provider": "OpenAI"},
     {"id": "openai/gpt-4o", "name": "GPT-4o", "provider": "OpenAI"},
     {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "Anthropic"},
@@ -74,4 +96,3 @@ AVAILABLE_AGENTS = [
     {"id": "claude-code", "name": "Claude Code", "harness": "harbor"},
     {"id": "oracle", "name": "Oracle (Testing)", "harness": "harbor"},
 ]
-

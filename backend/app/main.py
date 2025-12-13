@@ -287,7 +287,7 @@ async def retry_task(task_id: int, db: Session = Depends(get_db)):
 def execute_run(
     task_id: int,
     run_id: int,
-    openai_api_key: str = Query(..., description="OpenAI API key"),
+    openrouter_api_key: str = Query(..., description="OpenRouter API key"),
     timeout_seconds: int = Query(1200, description="Timeout in seconds"),
     db: Session = Depends(get_db),
 ):
@@ -322,7 +322,7 @@ def execute_run(
             zip_path=task.file_path,
             model=task.model,
             agent=task.agent,
-            openai_api_key=openai_api_key,
+            openrouter_api_key=openrouter_api_key,
             run_id=f"task_{task_id}_run_{run_id}",
             timeout_seconds=timeout_seconds,
         )
@@ -373,7 +373,7 @@ def execute_run(
 @app.post("/api/tasks/{task_id}/execute-one")
 def execute_one_run(
     task_id: int,
-    openai_api_key: str = Query(..., description="OpenAI API key"),
+    openrouter_api_key: str = Query(..., description="OpenRouter API key"),
     timeout_seconds: int = Query(1200, description="Timeout in seconds"),
     db: Session = Depends(get_db),
 ):
@@ -406,7 +406,7 @@ def execute_one_run(
     db.commit()
     
     # Execute the run (reuse the execute_run logic)
-    return execute_run(task_id, run.id, openai_api_key, timeout_seconds, db)
+    return execute_run(task_id, run.id, openrouter_api_key, timeout_seconds, db)
 
 
 # ============== Async Execution Endpoints (Stage 4) ==============
@@ -414,7 +414,7 @@ def execute_one_run(
 @app.post("/api/tasks/{task_id}/execute-async")
 def execute_task_async(
     task_id: int,
-    openai_api_key: str = Query(..., description="OpenAI API key"),
+    openrouter_api_key: str = Query(..., description="OpenRouter API key"),
     timeout_seconds: int = Query(1200, description="Timeout per run in seconds"),
     db: Session = Depends(get_db),
 ):
@@ -459,7 +459,7 @@ def execute_task_async(
         execute_harbor_run.delay(
             task_id=task_id,
             run_id=run_id,
-            openai_api_key=openai_api_key,
+            openrouter_api_key=openrouter_api_key,
             timeout_seconds=timeout_seconds,
         )
     
@@ -476,7 +476,7 @@ def execute_task_async(
 def execute_run_async(
     task_id: int,
     run_id: int,
-    openai_api_key: str = Query(..., description="OpenAI API key"),
+    openrouter_api_key: str = Query(..., description="OpenRouter API key"),
     timeout_seconds: int = Query(1200, description="Timeout in seconds"),
     db: Session = Depends(get_db),
 ):
@@ -502,7 +502,7 @@ def execute_run_async(
     execute_harbor_run.delay(
         task_id=task_id,
         run_id=run_id,
-        openai_api_key=openai_api_key,
+        openrouter_api_key=openrouter_api_key,
         timeout_seconds=timeout_seconds,
     )
     

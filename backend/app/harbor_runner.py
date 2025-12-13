@@ -24,13 +24,13 @@ class HarborRunner:
         model: str,
         agent: str = "terminus-2",
         jobs_dir: Optional[str] = None,
-        openai_api_key: Optional[str] = None,
+        openrouter_api_key: Optional[str] = None,
     ):
         self.task_path = Path(task_path)
         self.model = model
         self.agent = agent
         self.jobs_dir = Path(jobs_dir) if jobs_dir else Path(settings.jobs_dir)
-        self.openai_api_key = openai_api_key
+        self.openrouter_api_key = openrouter_api_key
         
         # Ensure jobs directory exists
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
@@ -106,14 +106,16 @@ class HarborRunner:
         
         try:
             # Set up environment with API keys
-            # CRITICAL: Must set OPENAI_API_BASE for litellm to work correctly
+            # Using OpenRouter for LLM access
             env = os.environ.copy()
             
-            if self.openai_api_key:
-                env["OPENAI_API_KEY"] = self.openai_api_key
+            if self.openrouter_api_key:
+                # OpenRouter uses OPENAI_API_KEY but with their base URL
+                env["OPENAI_API_KEY"] = self.openrouter_api_key
+                env["OPENROUTER_API_KEY"] = self.openrouter_api_key
             
-            # Always set the API base to fix litellm authentication issue
-            env["OPENAI_API_BASE"] = "https://api.openai.com/v1"
+            # Set OpenRouter base URL for litellm
+            env["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
             
             # Add harbor to PATH
             home = os.path.expanduser("~")
@@ -275,7 +277,7 @@ def run_task_sync(
     zip_path: str,
     model: str,
     agent: str = "terminus-2",
-    openai_api_key: Optional[str] = None,
+    openrouter_api_key: Optional[str] = None,
     run_id: Optional[str] = None,
     timeout_seconds: int = 1200,
 ) -> Dict[str, Any]:
@@ -296,7 +298,7 @@ def run_task_sync(
             task_path=temp_dir,
             model=model,
             agent=agent,
-            openai_api_key=openai_api_key,
+            openrouter_api_key=openrouter_api_key,
         )
         
         # Extract task

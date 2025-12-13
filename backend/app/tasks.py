@@ -18,7 +18,7 @@ def execute_harbor_run(
     self,
     task_id: int,
     run_id: int,
-    openai_api_key: str,
+    openrouter_api_key: str,
     timeout_seconds: int = 1200,
 ):
     """
@@ -49,7 +49,7 @@ def execute_harbor_run(
             zip_path=task.file_path,
             model=task.model,
             agent=task.agent,
-            openai_api_key=openai_api_key,
+            openrouter_api_key=openrouter_api_key,
             run_id=f"task_{task_id}_run_{run_id}",
             timeout_seconds=timeout_seconds,
         )
@@ -108,7 +108,7 @@ def execute_harbor_run(
 @celery_app.task
 def execute_all_runs(
     task_id: int,
-    openai_api_key: str,
+    openrouter_api_key: str,
     timeout_seconds: int = 1200,
 ):
     """
@@ -153,7 +153,7 @@ def execute_all_runs(
             execute_harbor_run.delay(
                 task_id=task_id,
                 run_id=run_id,
-                openai_api_key=openai_api_key,
+                openrouter_api_key=openrouter_api_key,
                 timeout_seconds=timeout_seconds,
             )
         

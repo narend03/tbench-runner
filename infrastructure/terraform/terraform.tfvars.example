@@ -1,0 +1,18 @@
+# TBench Runner Terraform Variables
+# Copy this file to terraform.tfvars and fill in your values
+
+aws_region   = "us-east-1"
+project_name = "tbench-runner"
+environment  = "production"
+
+# Database
+db_password = "your-secure-password-here"
+
+# OpenAI API Key
+openai_api_key = "sk-..."
+
+# Optional: Adjust instance sizes for your workload
+# db_instance_class    = "db.t3.small"
+# redis_node_type      = "cache.t3.small"
+# worker_desired_count = 4
+
