@@ -3,7 +3,7 @@
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-1"
+  default     = "us-west-2"
 }
 
 variable "project_name" {
@@ -101,9 +101,34 @@ variable "worker_desired_count" {
   default     = 4
 }
 
+# EC2 for Workers (Docker-in-Docker support)
+variable "worker_instance_type" {
+  description = "EC2 instance type for workers"
+  type        = string
+  default     = "t3.large"  # 2 vCPU, 8GB RAM - good for Harbor tasks
+}
+
+variable "worker_ec2_min_count" {
+  description = "Minimum number of EC2 instances for workers"
+  type        = number
+  default     = 1
+}
+
+variable "worker_ec2_max_count" {
+  description = "Maximum number of EC2 instances for workers"
+  type        = number
+  default     = 20  # Can handle ~100+ concurrent Harbor runs
+}
+
+variable "worker_ec2_desired_count" {
+  description = "Desired number of EC2 instances for workers"
+  type        = number
+  default     = 2
+}
+
 # Secrets
-variable "openai_api_key" {
-  description = "OpenAI API key"
+variable "openrouter_api_key" {
+  description = "OpenRouter API key"
   type        = string
   sensitive   = true
 }

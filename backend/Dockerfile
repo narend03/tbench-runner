@@ -11,12 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pipx and harbor
-RUN pip install --no-cache-dir pipx \
-    && pipx install harbor-bench \
-    && pipx ensurepath
+# Install uv and harbor
+RUN pip install --no-cache-dir uv \
+    && uv tool install harbor \
+    && ln -s /root/.local/bin/harbor /usr/local/bin/harbor
 
-# Add pipx binaries to PATH
+# Add uv binaries to PATH
 ENV PATH="/root/.local/bin:$PATH"
 
 # Set working directory

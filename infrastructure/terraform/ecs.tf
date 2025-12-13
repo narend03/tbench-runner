@@ -36,7 +36,7 @@ resource "aws_ecs_task_definition" "api" {
       
       secrets = [
         {
-          name      = "OPENAI_API_KEY"
+          name      = "OPENROUTER_API_KEY"
           valueFrom = aws_secretsmanager_secret.openai_key.arn
         }
       ]
@@ -61,20 +61,40 @@ resource "aws_ecs_task_definition" "api" {
   ])
 }
 
-# Worker Task Definition
+# Worker Task Definition (EC2 launch type with Docker socket)
 resource "aws_ecs_task_definition" "worker" {
   family                   = "${var.project_name}-worker"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                      = var.worker_cpu
-  memory                   = var.worker_memory
+  network_mode             = "bridge"  # Use bridge mode for Docker socket access
+  requires_compatibilities = ["EC2"]
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
+  
+  # Volume for Docker socket
+  volume {
+    name      = "docker-socket"
+    host_path = "/var/run/docker.sock"
+  }
   
   container_definitions = jsonencode([
     {
       name  = "worker"
       image = "${aws_ecr_repository.worker.repository_url}:latest"
+      
+      # Resource limits for EC2
+      cpu    = var.worker_cpu
+      memory = var.worker_memory
+      
+      # Mount Docker socket
+      mountPoints = [
+        {
+          sourceVolume  = "docker-socket"
+          containerPath = "/var/run/docker.sock"
+          readOnly      = false
+        }
+      ]
+      
+      # Run as root to access Docker socket
+      user = "root"
       
       environment = [
         { name = "ENVIRONMENT", value = var.environment },
@@ -85,12 +105,13 @@ resource "aws_ecs_task_definition" "worker" {
         { name = "STORAGE_BACKEND", value = "s3" },
         { name = "S3_BUCKET_NAME", value = aws_s3_bucket.uploads.bucket },
         { name = "AWS_REGION", value = var.aws_region },
-        { name = "OPENAI_API_BASE", value = "https://api.openai.com/v1" },
+        { name = "OPENROUTER_API_BASE", value = "https://openrouter.ai/api/v1" },
+        { name = "DOCKER_HOST", value = "unix:///var/run/docker.sock" },
       ]
       
       secrets = [
         {
-          name      = "OPENAI_API_KEY"
+          name      = "OPENROUTER_API_KEY"
           valueFrom = aws_secretsmanager_secret.openai_key.arn
         }
       ]
@@ -114,7 +135,7 @@ resource "aws_secretsmanager_secret" "openai_key" {
 
 resource "aws_secretsmanager_secret_version" "openai_key" {
   secret_id     = aws_secretsmanager_secret.openai_key.id
-  secret_string = var.openai_api_key
+  secret_string = var.openrouter_api_key
 }
 
 # IAM policy for Secrets Manager access
@@ -161,28 +182,37 @@ resource "aws_ecs_service" "api" {
   depends_on = [aws_lb_listener.http]
 }
 
-# Worker Service
+# Worker Service (EC2 with Docker access)
 resource "aws_ecs_service" "worker" {
   name            = "${var.project_name}-worker"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.worker.arn
   desired_count   = var.worker_desired_count
-  launch_type     = "FARGATE"
   
-  network_configuration {
-    subnets          = module.vpc.private_subnets
-    security_groups  = [aws_security_group.ecs.id]
-    assign_public_ip = false
+  # Use EC2 capacity provider instead of Fargate
+  capacity_provider_strategy {
+    capacity_provider = aws_ecs_capacity_provider.ec2_worker.name
+    weight            = 1
+    base              = 1
   }
+  
+  # No network_configuration needed for bridge mode
+  # Tasks will use the EC2 instance's network
+
+  # Allow service to scale with the capacity provider
+  depends_on = [aws_ecs_capacity_provider.ec2_worker]
 }
 
-# Auto Scaling for Workers
+# Auto Scaling for Worker Tasks (ECS Service scaling)
+# Note: EC2 instance scaling is handled by the capacity provider
 resource "aws_appautoscaling_target" "worker" {
-  max_capacity       = 20
-  min_capacity       = var.worker_desired_count
+  max_capacity       = 100  # Max Celery workers
+  min_capacity       = 2    # Minimum when idle
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.worker.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
+  
+  depends_on = [aws_ecs_service.worker]
 }
 
 resource "aws_appautoscaling_policy" "worker_cpu" {
@@ -199,6 +229,85 @@ resource "aws_appautoscaling_policy" "worker_cpu" {
     target_value       = 70.0
     scale_in_cooldown  = 300
     scale_out_cooldown = 60
+  }
+}
+
+# Frontend Task Definition
+resource "aws_ecs_task_definition" "frontend" {
+  family                   = "${var.project_name}-frontend"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = 256
+  memory                   = 512
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  
+  container_definitions = jsonencode([
+    {
+      name  = "frontend"
+      image = "${aws_ecr_repository.frontend.repository_url}:latest"
+      
+      portMappings = [
+        {
+          containerPort = 3000
+          protocol      = "tcp"
+        }
+      ]
+      
+      environment = [
+        { name = "NEXT_PUBLIC_API_URL", value = "http://${aws_lb.main.dns_name}" },
+      ]
+      
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.api.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "frontend"
+        }
+      }
+    }
+  ])
+}
+
+# Frontend ECS Service
+resource "aws_ecs_service" "frontend" {
+  name            = "${var.project_name}-frontend"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.frontend.arn
+  desired_count   = 2
+  launch_type     = "FARGATE"
+  
+  network_configuration {
+    subnets          = module.vpc.private_subnets
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = false
+  }
+  
+  load_balancer {
+    target_group_arn = aws_lb_target_group.frontend.arn
+    container_name   = "frontend"
+    container_port   = 3000
+  }
+}
+
+# Frontend Target Group
+resource "aws_lb_target_group" "frontend" {
+  name        = "${var.project_name}-frontend-tg"
+  port        = 3000
+  protocol    = "HTTP"
+  vpc_id      = module.vpc.vpc_id
+  target_type = "ip"
+  
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    matcher             = "200"
+    path                = "/"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    timeout             = 5
+    unhealthy_threshold = 3
   }
 }
 

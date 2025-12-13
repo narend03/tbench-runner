@@ -6,9 +6,9 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
-ENV OPENAI_API_BASE=https://api.openai.com/v1
+ENV OPENAI_API_BASE=https://openrouter.ai/api/v1
 
-# Install system dependencies including Docker CLI
+# Install system dependencies including Docker CLI and Docker Compose V2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
@@ -18,15 +18,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chmod a+r /etc/apt/keyrings/docker.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends docker-ce-cli \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pipx and harbor
-RUN pip install --no-cache-dir pipx \
-    && pipx install harbor-bench \
-    && pipx ensurepath
+# Verify Docker Compose V2 is installed
+RUN docker compose version
 
-# Add pipx binaries to PATH
+# Install uv and harbor
+RUN pip install --no-cache-dir uv \
+    && uv tool install harbor \
+    && ln -s /root/.local/bin/harbor /usr/local/bin/harbor
+
+# Add uv binaries to PATH
 ENV PATH="/root/.local/bin:$PATH"
 
 # Set working directory

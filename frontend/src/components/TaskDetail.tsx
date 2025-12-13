@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle, XCircle, Clock, Loader2, AlertCircle,
   Play, Terminal, ChevronDown, ChevronUp, Copy, Check,
   Zap, Timer, TestTube
 } from 'lucide-react';
-import { TaskDetail as TaskDetailType, Run, getTask, executeTaskAsync, getRunLogs } from '@/lib/api';
+import { TaskDetail as TaskDetailType, getTask, executeTaskAsync, getRunLogs } from '@/lib/api';
 
 interface TaskDetailProps {
   taskId: number;
@@ -15,7 +15,7 @@ interface TaskDetailProps {
   onUpdate: () => void;
 }
 
-const runStatusConfig = {
+const runStatusConfig: Record<string, { icon: typeof Clock; color: string; bg: string; label: string; animate?: boolean }> = {
   pending: { icon: Clock, color: 'text-terminal-yellow', bg: 'bg-yellow-500/20', label: 'Pending' },
   running: { icon: Loader2, color: 'text-terminal-blue', bg: 'bg-blue-500/20', label: 'Running', animate: true },
   passed: { icon: CheckCircle, color: 'text-terminal-green', bg: 'bg-green-500/20', label: 'Passed' },
@@ -33,7 +33,7 @@ export default function TaskDetail({ taskId, apiKey, onUpdate }: TaskDetailProps
   const [copied, setCopied] = useState(false);
 
   // Fetch task details
-  const fetchTask = async () => {
+  const fetchTask = useCallback(async () => {
     try {
       const data = await getTask(taskId);
       setTask(data);
@@ -42,7 +42,7 @@ export default function TaskDetail({ taskId, apiKey, onUpdate }: TaskDetailProps
     } finally {
       setLoading(false);
     }
-  };
+  }, [taskId]);
 
   // Poll for updates when running
   useEffect(() => {
@@ -55,7 +55,7 @@ export default function TaskDetail({ taskId, apiKey, onUpdate }: TaskDetailProps
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [taskId, task?.status]);
+  }, [taskId, task?.status, fetchTask]);
 
   // Fetch logs when run is expanded
   const handleExpandRun = async (runId: number) => {
@@ -70,7 +70,7 @@ export default function TaskDetail({ taskId, apiKey, onUpdate }: TaskDetailProps
       try {
         const { logs } = await getRunLogs(taskId, runId);
         setRunLogs(prev => ({ ...prev, [runId]: logs || 'No logs available' }));
-      } catch (error) {
+      } catch {
         setRunLogs(prev => ({ ...prev, [runId]: 'Failed to load logs' }));
       }
     }
@@ -88,8 +88,9 @@ export default function TaskDetail({ taskId, apiKey, onUpdate }: TaskDetailProps
       await executeTaskAsync(taskId, apiKey);
       fetchTask();
       onUpdate();
-    } catch (error: any) {
-      alert(error.response?.data?.detail || 'Failed to execute task');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      alert(err.response?.data?.detail || 'Failed to execute task');
     } finally {
       setExecuting(false);
     }

@@ -260,12 +260,30 @@ class HarborRunner:
             if reward > 0 or tests_total > 0:
                 break
         
-        # Fallback: determine pass/fail from reward
+        # First: try to parse pytest output directly from test logs
+        # This is the most reliable way to detect pass/fail
+        if test_logs:
+            import re
+            pytest_summary = re.search(r'(\d+) passed', test_logs)
+            pytest_failed = re.search(r'(\d+) failed', test_logs)
+            
+            if pytest_summary:
+                tests_passed = int(pytest_summary.group(1))
+                tests_total = tests_passed
+                if pytest_failed:
+                    tests_failed = int(pytest_failed.group(1))
+                    tests_total += tests_failed
+                # If tests passed and no failures, set reward to 1
+                if tests_passed > 0 and tests_failed == 0:
+                    reward = 1.0
+                print(f"   ✅ Parsed from pytest: {tests_passed}/{tests_total} passed, reward={reward}")
+        
+        # Fallback: determine pass/fail from reward file
         if tests_total == 0 and reward > 0:
             tests_total = 1
             tests_passed = 1
         elif tests_total == 0 and reward == 0:
-            # Check if there was actually a run
+            # Check if there was actually a run but no results found
             if trial_dirs:
                 tests_total = 1
                 tests_failed = 1

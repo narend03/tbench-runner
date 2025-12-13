@@ -50,3 +50,8 @@ frontend/out/
 tmp/
 temp/
 
+infrastructure/terraform/terraform.tfvars
+*.tfstate
+*.tfstate.backup
+.terraform/
+*.tfplan

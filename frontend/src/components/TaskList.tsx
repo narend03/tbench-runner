@@ -16,7 +16,7 @@ interface TaskListProps {
   onTaskUpdated: () => void;
 }
 
-const statusConfig = {
+const statusConfig: Record<string, { icon: typeof Clock; color: string; bg: string; label: string; animate?: boolean }> = {
   pending: {
     icon: Clock,
     color: 'text-terminal-yellow',

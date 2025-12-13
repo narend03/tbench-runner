@@ -16,6 +16,7 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loading, setLoading] = useState(true);
 
   // Load initial data

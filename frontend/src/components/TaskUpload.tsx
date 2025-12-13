@@ -73,8 +73,9 @@ export default function TaskUpload({ models, agents, onTaskCreated }: TaskUpload
       setNumRuns(10);
       
       onTaskCreated();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to upload task');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to upload task');
     } finally {
       setIsUploading(false);
     }

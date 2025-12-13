@@ -44,9 +44,17 @@ def execute_harbor_run(
         
         print(f"🏃 Celery executing run {run_id} for task {task_id}...")
         
+        # Get file (downloads from S3 if needed)
+        from .storage import get_file
+        local_zip_path = get_file(task.file_path)
+        if not local_zip_path:
+            raise FileNotFoundError(f"Could not get file: {task.file_path}")
+        
+        print(f"📦 Extracted task to: {local_zip_path}")
+        
         # Execute Harbor
         result = run_task_sync(
-            zip_path=task.file_path,
+            zip_path=local_zip_path,
             model=task.model,
             agent=task.agent,
             openrouter_api_key=openrouter_api_key,

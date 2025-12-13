@@ -121,16 +121,13 @@ async def create_task(
             detail=f"File too large. Maximum size is {settings.max_upload_size // (1024*1024)}MB"
         )
     
-    # Generate unique ID and save file
+    # Generate unique ID and save file (uses S3 in production)
     task_uuid = str(uuid.uuid4())
-    upload_dir = Path(settings.upload_dir) / task_uuid
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    
-    file_path = upload_dir / file.filename
     
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        from .storage import save_upload
+        file_path = save_upload(file.file, file.filename, task_uuid)
+        print(f"📁 File saved to: {file_path}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
@@ -195,13 +192,10 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Delete uploaded file
+    # Delete uploaded file (handles S3 and local)
     try:
-        file_path = Path(task.file_path)
-        if file_path.exists():
-            file_path.unlink()
-        if file_path.parent.exists():
-            shutil.rmtree(file_path.parent)
+        from .storage import delete_file
+        delete_file(task.file_path)
     except Exception as e:
         print(f"⚠️ Failed to delete task files: {e}")
     
