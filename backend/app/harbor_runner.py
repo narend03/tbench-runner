@@ -9,12 +9,10 @@ import zipfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
-import structlog
 
 from .config import get_settings
 
 settings = get_settings()
-logger = structlog.get_logger()
 
 
 class HarborRunner:
@@ -25,14 +23,14 @@ class HarborRunner:
         task_path: str,
         model: str,
         agent: str = "terminus-2",
-        harness: str = "harbor",
         jobs_dir: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
     ):
         self.task_path = Path(task_path)
         self.model = model
         self.agent = agent
-        self.harness = harness
         self.jobs_dir = Path(jobs_dir) if jobs_dir else Path(settings.jobs_dir)
+        self.openai_api_key = openai_api_key
         
         # Ensure jobs directory exists
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
@@ -48,7 +46,7 @@ class HarborRunner:
         # Find the actual task directory (might be nested)
         task_dir = self._find_task_dir(extract_path)
         
-        logger.info("Extracted task", zip_path=zip_path, task_dir=str(task_dir))
+        print(f"📦 Extracted task to: {task_dir}")
         return str(task_dir)
     
     def _find_task_dir(self, extract_path: Path) -> Path:
@@ -77,13 +75,14 @@ class HarborRunner:
     def run_single(
         self,
         run_id: str,
-        timeout_multiplier: float = 1.0,
+        timeout_seconds: int = 1200,  # 20 minutes default
     ) -> Dict[str, Any]:
         """
         Run a single attempt of the task.
         
         Returns dict with:
             - success: bool
+            - reward: float (0.0 or 1.0)
             - tests_total: int
             - tests_passed: int
             - tests_failed: int
@@ -97,98 +96,94 @@ class HarborRunner:
         run_jobs_dir.mkdir(parents=True, exist_ok=True)
         
         # Build harbor command
-        cmd = self._build_harbor_command(run_jobs_dir, timeout_multiplier)
+        cmd = self._build_harbor_command(run_jobs_dir)
         
-        logger.info(
-            "Starting harbor run",
-            run_id=run_id,
-            task_path=str(self.task_path),
-            model=self.model,
-            agent=self.agent,
-            command=" ".join(cmd)
-        )
+        print(f"🚀 Starting Harbor run: {run_id}")
+        print(f"   Task: {self.task_path}")
+        print(f"   Model: {self.model}")
+        print(f"   Agent: {self.agent}")
+        print(f"   Command: {' '.join(cmd)}")
         
         try:
             # Set up environment with API keys
+            # CRITICAL: Must set OPENAI_API_BASE for litellm to work correctly
             env = os.environ.copy()
-            if settings.openrouter_api_key:
-                env["OPENROUTER_API_KEY"] = settings.openrouter_api_key
-                env["OPENAI_API_KEY"] = settings.openrouter_api_key
-                env["OPENAI_API_BASE"] = settings.openrouter_base_url
+            
+            if self.openai_api_key:
+                env["OPENAI_API_KEY"] = self.openai_api_key
+            
+            # Always set the API base to fix litellm authentication issue
+            env["OPENAI_API_BASE"] = "https://api.openai.com/v1"
+            
+            # Add harbor to PATH
+            home = os.path.expanduser("~")
+            env["PATH"] = f"{home}/.local/bin:" + env.get("PATH", "")
             
             # Run harbor command
+            print(f"⏳ Running Harbor (timeout: {timeout_seconds}s)...")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=3600 * timeout_multiplier,  # 1 hour default
-                cwd=str(self.task_path.parent),
+                timeout=timeout_seconds,
                 env=env,
             )
             
             logs = result.stdout + "\n" + result.stderr
-            
-            # Parse results from output
-            tests_total, tests_passed, tests_failed = self._parse_test_results(
-                run_jobs_dir, logs
-            )
-            
             duration = (datetime.utcnow() - start_time).total_seconds()
             
-            if result.returncode == 0:
-                return {
-                    "success": True,
-                    "tests_total": tests_total,
-                    "tests_passed": tests_passed,
-                    "tests_failed": tests_failed,
-                    "logs": logs,
-                    "error": None,
-                    "duration_seconds": duration,
-                    "output_path": str(run_jobs_dir),
-                }
-            else:
-                return {
-                    "success": False,
-                    "tests_total": tests_total,
-                    "tests_passed": tests_passed,
-                    "tests_failed": tests_failed,
-                    "logs": logs,
-                    "error": f"Command failed with return code {result.returncode}",
-                    "duration_seconds": duration,
-                    "output_path": str(run_jobs_dir),
-                }
+            print(f"✅ Harbor finished in {duration:.1f}s (exit code: {result.returncode})")
+            
+            # Parse results from Harbor output directory
+            reward, tests_total, tests_passed, tests_failed, test_logs = self._parse_harbor_output(run_jobs_dir)
+            
+            # Combine logs
+            full_logs = logs
+            if test_logs:
+                full_logs += "\n\n=== TEST OUTPUT ===\n" + test_logs
+            
+            return {
+                "success": reward > 0,
+                "reward": reward,
+                "tests_total": tests_total,
+                "tests_passed": tests_passed,
+                "tests_failed": tests_failed,
+                "logs": full_logs,
+                "error": None if result.returncode == 0 else f"Exit code: {result.returncode}",
+                "duration_seconds": duration,
+                "output_path": str(run_jobs_dir),
+            }
                 
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
             duration = (datetime.utcnow() - start_time).total_seconds()
+            print(f"⏰ Harbor timed out after {duration:.1f}s")
             return {
                 "success": False,
+                "reward": 0.0,
                 "tests_total": 0,
                 "tests_passed": 0,
                 "tests_failed": 0,
-                "logs": str(e),
-                "error": "Task timed out",
+                "logs": f"Task timed out after {timeout_seconds} seconds",
+                "error": "Timeout",
                 "duration_seconds": duration,
                 "output_path": str(run_jobs_dir),
             }
         except Exception as e:
             duration = (datetime.utcnow() - start_time).total_seconds()
-            logger.error("Harbor run failed", run_id=run_id, error=str(e))
+            print(f"❌ Harbor failed: {e}")
             return {
                 "success": False,
+                "reward": 0.0,
                 "tests_total": 0,
                 "tests_passed": 0,
                 "tests_failed": 0,
-                "logs": "",
+                "logs": str(e),
                 "error": str(e),
                 "duration_seconds": duration,
                 "output_path": str(run_jobs_dir),
             }
     
-    def _build_harbor_command(
-        self,
-        output_dir: Path,
-        timeout_multiplier: float
-    ) -> list:
+    def _build_harbor_command(self, output_dir: Path) -> list:
         """Build the harbor CLI command."""
         cmd = [
             "harbor", "run",
@@ -197,7 +192,6 @@ class HarborRunner:
             "--jobs-dir", str(output_dir),
             "--n-attempts", "1",
             "--n-concurrent", "1",
-            "--timeout-multiplier", str(timeout_multiplier),
         ]
         
         # Add model if specified (not for oracle agent)
@@ -206,108 +200,117 @@ class HarborRunner:
         
         return cmd
     
-    def _parse_test_results(
-        self,
-        output_dir: Path,
-        logs: str
-    ) -> Tuple[int, int, int]:
-        """Parse test results from Harbor output."""
+    def _parse_harbor_output(self, output_dir: Path) -> Tuple[float, int, int, int, str]:
+        """
+        Parse Harbor output directory for results.
+        
+        Returns: (reward, tests_total, tests_passed, tests_failed, test_logs)
+        """
+        reward = 0.0
         tests_total = 0
         tests_passed = 0
         tests_failed = 0
+        test_logs = ""
         
-        # Try to find results.json or similar output
-        for results_file in output_dir.rglob("*.json"):
-            try:
-                with open(results_file) as f:
-                    data = json.load(f)
-                    
-                # Look for test results in various formats
-                if "tests" in data:
-                    tests = data["tests"]
-                    tests_total = len(tests)
-                    tests_passed = sum(1 for t in tests if t.get("passed", False))
-                    tests_failed = tests_total - tests_passed
-                elif "passed" in data:
-                    tests_passed = int(data.get("passed", 0))
-                    tests_failed = int(data.get("failed", 0))
-                    tests_total = tests_passed + tests_failed
-                elif "score" in data:
-                    # Some formats use score as pass rate
-                    score = float(data.get("score", 0))
-                    tests_total = 1
-                    tests_passed = 1 if score > 0.5 else 0
-                    tests_failed = 1 - tests_passed
-                    
-            except (json.JSONDecodeError, KeyError, ValueError):
+        # Find the trial directory (format: taskname__randomid)
+        trial_dirs = list(output_dir.rglob("*__*"))
+        if not trial_dirs:
+            # Try finding any subdirectory with verifier folder
+            trial_dirs = [d for d in output_dir.iterdir() if d.is_dir() and (d / "verifier").exists()]
+        
+        for trial_dir in trial_dirs:
+            if not trial_dir.is_dir():
                 continue
+                
+            # Parse reward.txt
+            reward_file = trial_dir / "verifier" / "reward.txt"
+            if reward_file.exists():
+                try:
+                    reward = float(reward_file.read_text().strip())
+                    print(f"   Reward: {reward}")
+                except (ValueError, IOError):
+                    pass
+            
+            # Parse ctrf.json for detailed test results
+            ctrf_file = trial_dir / "verifier" / "ctrf.json"
+            if ctrf_file.exists():
+                try:
+                    with open(ctrf_file) as f:
+                        ctrf_data = json.load(f)
+                    
+                    summary = ctrf_data.get("results", {}).get("summary", {})
+                    tests_total = summary.get("tests", 0)
+                    tests_passed = summary.get("passed", 0)
+                    tests_failed = summary.get("failed", 0)
+                    print(f"   Tests: {tests_passed}/{tests_total} passed")
+                except (json.JSONDecodeError, IOError):
+                    pass
+            
+            # Read test output
+            test_stdout = trial_dir / "verifier" / "test-stdout.txt"
+            if test_stdout.exists():
+                try:
+                    test_logs = test_stdout.read_text()[-5000:]  # Last 5KB
+                except IOError:
+                    pass
+            
+            # If we found results, break (use first trial)
+            if reward > 0 or tests_total > 0:
+                break
         
-        # Fallback: parse from logs
-        if tests_total == 0:
-            tests_total, tests_passed, tests_failed = self._parse_logs_for_results(logs)
+        # Fallback: determine pass/fail from reward
+        if tests_total == 0 and reward > 0:
+            tests_total = 1
+            tests_passed = 1
+        elif tests_total == 0 and reward == 0:
+            # Check if there was actually a run
+            if trial_dirs:
+                tests_total = 1
+                tests_failed = 1
         
-        return tests_total, tests_passed, tests_failed
-    
-    def _parse_logs_for_results(self, logs: str) -> Tuple[int, int, int]:
-        """Parse test results from log output."""
-        import re
-        
-        # Try pytest-style output: "X passed, Y failed"
-        pytest_match = re.search(r'(\d+)\s+passed.*?(\d+)\s+failed', logs, re.IGNORECASE)
-        if pytest_match:
-            passed = int(pytest_match.group(1))
-            failed = int(pytest_match.group(2))
-            return passed + failed, passed, failed
-        
-        # Try simple passed/failed counts
-        passed_match = re.search(r'(\d+)\s+(?:test|tests)\s+passed', logs, re.IGNORECASE)
-        failed_match = re.search(r'(\d+)\s+(?:test|tests)\s+failed', logs, re.IGNORECASE)
-        
-        passed = int(passed_match.group(1)) if passed_match else 0
-        failed = int(failed_match.group(1)) if failed_match else 0
-        
-        if passed > 0 or failed > 0:
-            return passed + failed, passed, failed
-        
-        # Check for success/failure indicators
-        if "PASSED" in logs or "SUCCESS" in logs:
-            return 1, 1, 0
-        elif "FAILED" in logs or "ERROR" in logs:
-            return 1, 0, 1
-        
-        return 0, 0, 0
+        return reward, tests_total, tests_passed, tests_failed, test_logs
 
 
-def run_task_locally(
-    task_zip_path: str,
+def run_task_sync(
+    zip_path: str,
     model: str,
     agent: str = "terminus-2",
-    harness: str = "harbor",
+    openai_api_key: Optional[str] = None,
     run_id: Optional[str] = None,
+    timeout_seconds: int = 1200,
 ) -> Dict[str, Any]:
     """
-    Run a single Terminal-Bench task locally.
+    Run a Terminal-Bench task synchronously.
     
-    This is a helper function for local testing (Goal 1).
+    This extracts the zip, runs Harbor, and returns the results.
     """
     if run_id is None:
         run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     
     # Create temp directory for extraction
-    with tempfile.TemporaryDirectory() as temp_dir:
+    temp_dir = tempfile.mkdtemp(prefix="tbench_")
+    
+    try:
+        # Initialize runner
         runner = HarborRunner(
             task_path=temp_dir,
             model=model,
             agent=agent,
-            harness=harness,
+            openai_api_key=openai_api_key,
         )
         
         # Extract task
-        task_dir = runner.extract_task(task_zip_path, temp_dir)
+        task_dir = runner.extract_task(zip_path, temp_dir)
         runner.task_path = Path(task_dir)
         
         # Run task
-        result = runner.run_single(run_id)
+        result = runner.run_single(run_id, timeout_seconds=timeout_seconds)
         
         return result
-
+        
+    finally:
+        # Clean up temp directory
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception:
+            pass

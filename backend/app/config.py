@@ -36,12 +36,12 @@ class Settings(BaseSettings):
     harbor_default_env: str = "docker"
     harbor_n_concurrent: int = 4
     
-    # OpenRouter API
-    openrouter_api_key: str = ""
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # OpenAI API (required for LLM execution)
+    openai_api_key: str = ""
+    openai_api_base: str = "https://api.openai.com/v1"
     
-    # Supported models
-    default_model: str = "openai/gpt-4o"
+    # Default model
+    default_model: str = "openai/gpt-5"
     
     # Task limits
     max_runs_per_task: int = 10
@@ -60,10 +60,11 @@ def get_settings() -> Settings:
 
 # Available models for selection
 AVAILABLE_MODELS = [
+    {"id": "openai/gpt-5", "name": "GPT-5", "provider": "OpenAI"},
+    {"id": "openai/gpt-5.2", "name": "GPT-5.2 (Latest)", "provider": "OpenAI"},
+    {"id": "openai/gpt-5-mini", "name": "GPT-5 Mini", "provider": "OpenAI"},
     {"id": "openai/gpt-4o", "name": "GPT-4o", "provider": "OpenAI"},
     {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "Anthropic"},
-    {"id": "anthropic/claude-opus-4", "name": "Claude Opus 4", "provider": "Anthropic"},
-    {"id": "google/gemini-2.0-flash-exp", "name": "Gemini 2.0 Flash", "provider": "Google"},
 ]
 
 # Available agents/harnesses

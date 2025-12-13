@@ -7,23 +7,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-import structlog
 
 from .config import get_settings, AVAILABLE_MODELS, AVAILABLE_AGENTS
 from .database import get_db, create_tables
 from .models import (
     Task, Run, TaskStatus, RunStatus,
-    TaskCreate, TaskResponse, TaskDetailResponse, RunResponse,
+    TaskResponse, TaskDetailResponse, RunResponse,
     ModelsResponse, AgentsResponse
 )
-from .tasks import execute_task, execute_run
+from .harbor_runner import run_task_sync
 
 settings = get_settings()
-logger = structlog.get_logger()
 
 # Create FastAPI app
 app = FastAPI(
@@ -52,7 +49,7 @@ async def startup():
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.jobs_dir).mkdir(parents=True, exist_ok=True)
     
-    logger.info("TBench Runner started")
+    print(f"🚀 TBench Runner started on http://{settings.host}:{settings.port}")
 
 
 @app.get("/")
@@ -61,7 +58,8 @@ async def root():
     return {
         "name": "TBench Runner",
         "version": "1.0.0",
-        "status": "running"
+        "status": "running",
+        "docs": "/docs"
     }
 
 
@@ -71,7 +69,7 @@ async def health():
     return {"status": "healthy"}
 
 
-# Models and Agents endpoints
+# ============== Models and Agents ==============
 
 @app.get("/api/models", response_model=List[ModelsResponse])
 async def get_models():
@@ -85,13 +83,13 @@ async def get_agents():
     return AVAILABLE_AGENTS
 
 
-# Task endpoints
+# ============== Task CRUD ==============
 
 @app.post("/api/tasks", response_model=TaskResponse)
 async def create_task(
     file: UploadFile = File(...),
     name: str = Query(..., description="Task name"),
-    model: str = Query("openai/gpt-4o", description="Model to use"),
+    model: str = Query("openai/gpt-5", description="Model to use"),
     agent: str = Query("terminus-2", description="Agent to use"),
     harness: str = Query("harbor", description="Harness to use"),
     num_runs: int = Query(10, ge=1, le=100, description="Number of runs"),
@@ -107,14 +105,14 @@ async def create_task(
     - solution/: Oracle solution (optional)
     - environment/: Environment files (optional)
     """
-    # Validate file
-    if not file.filename.endswith('.zip'):
+    # Validate file type
+    if not file.filename or not file.filename.endswith('.zip'):
         raise HTTPException(status_code=400, detail="File must be a zip archive")
     
     # Check file size
-    file.file.seek(0, 2)  # Seek to end
+    file.file.seek(0, 2)
     file_size = file.file.tell()
-    file.file.seek(0)  # Seek back to start
+    file.file.seek(0)
     
     if file_size > settings.max_upload_size:
         raise HTTPException(
@@ -122,9 +120,9 @@ async def create_task(
             detail=f"File too large. Maximum size is {settings.max_upload_size // (1024*1024)}MB"
         )
     
-    # Generate unique filename and save
-    task_id = str(uuid.uuid4())
-    upload_dir = Path(settings.upload_dir) / task_id
+    # Generate unique ID and save file
+    task_uuid = str(uuid.uuid4())
+    upload_dir = Path(settings.upload_dir) / task_uuid
     upload_dir.mkdir(parents=True, exist_ok=True)
     
     file_path = upload_dir / file.filename
@@ -152,17 +150,10 @@ async def create_task(
     db.commit()
     db.refresh(task)
     
-    logger.info(
-        "Task created",
-        task_id=task.id,
-        name=name,
-        model=model,
-        agent=agent,
-        num_runs=num_runs
-    )
+    print(f"📦 Task created: {task.id} - {name} ({num_runs} runs with {model})")
     
-    # Start task execution asynchronously
-    execute_task.delay(task.id)
+    # Stage 2: Just store the task, don't execute yet
+    # In Stage 3, we'll add: execute_task(task.id)
     
     return task
 
@@ -211,18 +202,59 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
         if file_path.parent.exists():
             shutil.rmtree(file_path.parent)
     except Exception as e:
-        logger.warning("Failed to delete task files", error=str(e))
+        print(f"⚠️ Failed to delete task files: {e}")
     
     # Delete task (cascades to runs)
     db.delete(task)
     db.commit()
     
+    print(f"🗑️ Task deleted: {task_id}")
     return {"message": "Task deleted successfully"}
+
+
+@app.post("/api/tasks/{task_id}/start")
+async def start_task(task_id: int, db: Session = Depends(get_db)):
+    """
+    Start execution of a task.
+    
+    Stage 2: This is a mock - just changes status to 'running'.
+    Stage 3: Will actually execute Harbor.
+    """
+    task = db.query(Task).filter(Task.id == task_id).first()
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.status != TaskStatus.PENDING.value:
+        raise HTTPException(status_code=400, detail=f"Task is already {task.status}")
+    
+    # Update status to running
+    task.status = TaskStatus.RUNNING.value
+    task.started_at = datetime.utcnow()
+    
+    # Create placeholder runs
+    for run_num in range(1, task.num_runs + 1):
+        run = Run(
+            task_id=task.id,
+            run_number=run_num,
+            status=RunStatus.PENDING.value,
+        )
+        db.add(run)
+    
+    task.total_runs = task.num_runs
+    db.commit()
+    
+    print(f"▶️ Task started: {task_id} ({task.num_runs} runs queued)")
+    
+    # Stage 2: Mock - just create runs with pending status
+    # Stage 3: Will trigger actual Harbor execution
+    
+    return {"message": f"Task started with {task.num_runs} runs", "task_id": task_id}
 
 
 @app.post("/api/tasks/{task_id}/retry")
 async def retry_task(task_id: int, db: Session = Depends(get_db)):
-    """Retry a failed task."""
+    """Retry a failed or completed task."""
     task = db.query(Task).filter(Task.id == task_id).first()
     
     if not task:
@@ -244,13 +276,160 @@ async def retry_task(task_id: int, db: Session = Depends(get_db)):
     
     db.commit()
     
-    # Restart execution
-    execute_task.delay(task.id)
+    print(f"🔄 Task reset for retry: {task_id}")
+    return {"message": "Task reset for retry", "task_id": task_id}
+
+
+# ============== Execution Endpoints (Stage 3) ==============
+
+@app.post("/api/tasks/{task_id}/runs/{run_id}/execute")
+def execute_run(
+    task_id: int,
+    run_id: int,
+    openai_api_key: str = Query(..., description="OpenAI API key"),
+    timeout_seconds: int = Query(1200, description="Timeout in seconds"),
+    db: Session = Depends(get_db),
+):
+    """
+    Execute a single run synchronously using Harbor.
     
-    return {"message": "Task retry started"}
+    This endpoint blocks until Harbor completes (or times out).
+    Returns the full results including logs and test counts.
+    """
+    # Get task and run
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    run = db.query(Run).filter(Run.id == run_id, Run.task_id == task_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    if run.status not in [RunStatus.PENDING.value]:
+        raise HTTPException(status_code=400, detail=f"Run is already {run.status}")
+    
+    # Update run status to running
+    run.status = RunStatus.RUNNING.value
+    run.started_at = datetime.utcnow()
+    db.commit()
+    
+    print(f"🏃 Executing run {run_id} for task {task_id}...")
+    
+    try:
+        # Execute Harbor
+        result = run_task_sync(
+            zip_path=task.file_path,
+            model=task.model,
+            agent=task.agent,
+            openai_api_key=openai_api_key,
+            run_id=f"task_{task_id}_run_{run_id}",
+            timeout_seconds=timeout_seconds,
+        )
+        
+        # Update run with results
+        run.status = RunStatus.PASSED.value if result["success"] else RunStatus.FAILED.value
+        run.completed_at = datetime.utcnow()
+        run.tests_total = result["tests_total"]
+        run.tests_passed = result["tests_passed"]
+        run.tests_failed = result["tests_failed"]
+        run.logs = result["logs"][:50000] if result["logs"] else None  # Limit log size
+        run.error_message = result["error"]
+        run.duration_seconds = result["duration_seconds"]
+        
+        db.commit()
+        
+        # Update task statistics
+        _update_task_stats(db, task)
+        
+        print(f"✅ Run {run_id} completed: {'PASSED' if result['success'] else 'FAILED'}")
+        
+        return {
+            "run_id": run_id,
+            "task_id": task_id,
+            "status": run.status,
+            "success": result["success"],
+            "reward": result.get("reward", 0),
+            "tests_total": result["tests_total"],
+            "tests_passed": result["tests_passed"],
+            "tests_failed": result["tests_failed"],
+            "duration_seconds": result["duration_seconds"],
+            "error": result["error"],
+        }
+        
+    except Exception as e:
+        # Mark run as failed
+        run.status = RunStatus.ERROR.value
+        run.completed_at = datetime.utcnow()
+        run.error_message = str(e)
+        db.commit()
+        
+        _update_task_stats(db, task)
+        
+        print(f"❌ Run {run_id} failed with error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# Run endpoints
+@app.post("/api/tasks/{task_id}/execute-one")
+def execute_one_run(
+    task_id: int,
+    openai_api_key: str = Query(..., description="OpenAI API key"),
+    timeout_seconds: int = Query(1200, description="Timeout in seconds"),
+    db: Session = Depends(get_db),
+):
+    """
+    Quick endpoint: Create a run and execute it immediately.
+    
+    Useful for testing - uploads a task, creates one run, executes it.
+    """
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Start task if pending
+    if task.status == TaskStatus.PENDING.value:
+        task.status = TaskStatus.RUNNING.value
+        task.started_at = datetime.utcnow()
+    
+    # Create a new run
+    existing_runs = db.query(Run).filter(Run.task_id == task_id).count()
+    run = Run(
+        task_id=task_id,
+        run_number=existing_runs + 1,
+        status=RunStatus.PENDING.value,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    
+    task.total_runs = existing_runs + 1
+    db.commit()
+    
+    # Execute the run (reuse the execute_run logic)
+    return execute_run(task_id, run.id, openai_api_key, timeout_seconds, db)
+
+
+def _update_task_stats(db: Session, task: Task):
+    """Update task statistics based on completed runs."""
+    runs = db.query(Run).filter(Run.task_id == task.id).all()
+    
+    completed_statuses = [RunStatus.PASSED.value, RunStatus.FAILED.value, RunStatus.ERROR.value]
+    completed_runs = [r for r in runs if r.status in completed_statuses]
+    passed_runs = [r for r in runs if r.status == RunStatus.PASSED.value]
+    failed_runs = [r for r in runs if r.status in [RunStatus.FAILED.value, RunStatus.ERROR.value]]
+    
+    task.total_runs = len(runs)
+    task.passed_runs = len(passed_runs)
+    task.failed_runs = len(failed_runs)
+    
+    # Mark task complete if all runs done
+    if len(completed_runs) >= task.num_runs:
+        task.status = TaskStatus.COMPLETED.value
+        task.completed_at = datetime.utcnow()
+    
+    db.commit()
+
+
+# ============== Run Endpoints ==============
 
 @app.get("/api/tasks/{task_id}/runs", response_model=List[RunResponse])
 async def list_runs(task_id: int, db: Session = Depends(get_db)):
@@ -285,12 +464,15 @@ async def get_run_logs(task_id: int, run_id: int, db: Session = Depends(get_db))
     
     return {
         "run_id": run_id,
+        "task_id": task_id,
+        "run_number": run.run_number,
+        "status": run.status,
         "logs": run.logs or "",
         "error_message": run.error_message,
     }
 
 
-# Statistics endpoint
+# ============== Statistics ==============
 
 @app.get("/api/stats")
 async def get_stats(db: Session = Depends(get_db)):
@@ -321,7 +503,8 @@ async def get_stats(db: Session = Depends(get_db)):
     }
 
 
+# ============== Main ==============
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=settings.host, port=settings.port)
-
