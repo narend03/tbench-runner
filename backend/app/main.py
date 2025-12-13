@@ -19,6 +19,7 @@ from .models import (
     ModelsResponse, AgentsResponse
 )
 from .harbor_runner import run_task_sync
+from .tasks import execute_harbor_run, execute_all_runs
 
 settings = get_settings()
 
@@ -406,6 +407,112 @@ def execute_one_run(
     
     # Execute the run (reuse the execute_run logic)
     return execute_run(task_id, run.id, openai_api_key, timeout_seconds, db)
+
+
+# ============== Async Execution Endpoints (Stage 4) ==============
+
+@app.post("/api/tasks/{task_id}/execute-async")
+def execute_task_async(
+    task_id: int,
+    openai_api_key: str = Query(..., description="OpenAI API key"),
+    timeout_seconds: int = Query(1200, description="Timeout per run in seconds"),
+    db: Session = Depends(get_db),
+):
+    """
+    Execute ALL runs for a task asynchronously.
+    
+    This endpoint returns immediately. Runs are executed in the background
+    by Celery workers. Poll /api/tasks/{task_id} to check progress.
+    
+    This is the main endpoint for Stage 4 / Goal 2.
+    """
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.status != TaskStatus.PENDING.value:
+        raise HTTPException(status_code=400, detail=f"Task is already {task.status}")
+    
+    # Update task status
+    task.status = TaskStatus.RUNNING.value
+    task.started_at = datetime.utcnow()
+    
+    # Create all runs
+    run_ids = []
+    for run_num in range(1, task.num_runs + 1):
+        run = Run(
+            task_id=task.id,
+            run_number=run_num,
+            status=RunStatus.PENDING.value,
+        )
+        db.add(run)
+        db.flush()
+        run_ids.append(run.id)
+    
+    task.total_runs = task.num_runs
+    db.commit()
+    
+    print(f"🚀 Queuing {task.num_runs} async runs for task {task_id}")
+    
+    # Queue each run as a Celery task
+    for run_id in run_ids:
+        execute_harbor_run.delay(
+            task_id=task_id,
+            run_id=run_id,
+            openai_api_key=openai_api_key,
+            timeout_seconds=timeout_seconds,
+        )
+    
+    return {
+        "message": f"Task queued with {task.num_runs} runs",
+        "task_id": task_id,
+        "runs_queued": len(run_ids),
+        "status": "running",
+        "poll_url": f"/api/tasks/{task_id}",
+    }
+
+
+@app.post("/api/tasks/{task_id}/runs/{run_id}/execute-async")
+def execute_run_async(
+    task_id: int,
+    run_id: int,
+    openai_api_key: str = Query(..., description="OpenAI API key"),
+    timeout_seconds: int = Query(1200, description="Timeout in seconds"),
+    db: Session = Depends(get_db),
+):
+    """
+    Execute a single run asynchronously.
+    
+    Returns immediately. Poll /api/tasks/{task_id}/runs/{run_id} to check progress.
+    """
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    run = db.query(Run).filter(Run.id == run_id, Run.task_id == task_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    if run.status not in [RunStatus.PENDING.value]:
+        raise HTTPException(status_code=400, detail=f"Run is already {run.status}")
+    
+    print(f"🚀 Queuing async run {run_id} for task {task_id}")
+    
+    # Queue the run
+    execute_harbor_run.delay(
+        task_id=task_id,
+        run_id=run_id,
+        openai_api_key=openai_api_key,
+        timeout_seconds=timeout_seconds,
+    )
+    
+    return {
+        "message": "Run queued",
+        "task_id": task_id,
+        "run_id": run_id,
+        "status": "queued",
+        "poll_url": f"/api/tasks/{task_id}/runs/{run_id}",
+    }
 
 
 def _update_task_stats(db: Session, task: Task):

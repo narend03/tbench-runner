@@ -1,4 +1,4 @@
-"""Celery application for distributed task execution."""
+"""Celery application configuration for async task execution."""
 
 from celery import Celery
 from .config import get_settings
@@ -8,12 +8,12 @@ settings = get_settings()
 # Create Celery app
 celery_app = Celery(
     "tbench_runner",
-    broker=settings.celery_broker_url,
-    backend=settings.celery_result_backend,
-    include=["app.tasks"]
+    broker=settings.redis_url,
+    backend=settings.redis_url,
+    include=["app.tasks"],  # Import tasks module
 )
 
-# Configure Celery
+# Celery configuration
 celery_app.conf.update(
     # Task settings
     task_serializer="json",
@@ -22,28 +22,23 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     
+    # Result backend settings
+    result_expires=3600,  # Results expire after 1 hour
+    
     # Worker settings
-    worker_prefetch_multiplier=1,  # One task at a time per worker
-    worker_concurrency=4,  # Number of concurrent workers
+    worker_prefetch_multiplier=1,  # Don't prefetch tasks (Harbor is slow)
+    worker_concurrency=4,  # 4 concurrent Harbor runs per worker
     
-    # Result settings
-    result_expires=86400,  # 24 hours
-    
-    # Task limits
-    task_time_limit=7200,  # 2 hours max per task
-    task_soft_time_limit=3600,  # 1 hour soft limit
+    # Task execution settings
+    task_acks_late=True,  # Ack after task completes (for reliability)
+    task_reject_on_worker_lost=True,  # Requeue if worker dies
     
     # Retry settings
-    task_acks_late=True,
-    task_reject_on_worker_lost=True,
-    
-    # Rate limiting for API calls
-    task_default_rate_limit="10/m",
+    task_default_retry_delay=60,  # Wait 60s before retry
+    task_max_retries=2,  # Max 2 retries
 )
 
-# Task routing
+# Optional: Configure task routes for different queues
 celery_app.conf.task_routes = {
-    "app.tasks.execute_run": {"queue": "runs"},
-    "app.tasks.execute_task": {"queue": "tasks"},
+    "app.tasks.execute_harbor_run": {"queue": "harbor"},
 }
-
