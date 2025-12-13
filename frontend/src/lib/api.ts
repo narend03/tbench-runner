@@ -157,5 +157,24 @@ export async function getStats(): Promise<Stats> {
   return response.data;
 }
 
+// Stage 4: Async execution
+export async function executeTaskAsync(
+  taskId: number,
+  openaiApiKey: string,
+  timeoutSeconds: number = 1200
+): Promise<{ message: string; task_id: number; runs_queued: number; status: string; poll_url: string }> {
+  const params = new URLSearchParams({
+    openai_api_key: openaiApiKey,
+    timeout_seconds: timeoutSeconds.toString(),
+  });
+  const response = await api.post(`/api/tasks/${taskId}/execute-async?${params}`);
+  return response.data;
+}
+
+export async function startTask(taskId: number): Promise<{ message: string; task_id: number }> {
+  const response = await api.post(`/api/tasks/${taskId}/start`);
+  return response.data;
+}
+
 export default api;
 
