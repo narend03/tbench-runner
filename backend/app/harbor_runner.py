@@ -106,16 +106,19 @@ class HarborRunner:
         
         try:
             # Set up environment with API keys
-            # Using OpenRouter for LLM access
+            # Using OpenRouter for LLM access via litellm
             env = os.environ.copy()
             
             if self.openrouter_api_key:
-                # OpenRouter uses OPENAI_API_KEY but with their base URL
-                env["OPENAI_API_KEY"] = self.openrouter_api_key
+                # For litellm with openrouter/ prefix models, set OPENROUTER_API_KEY
+                # litellm automatically routes to OpenRouter when model has openrouter/ prefix
                 env["OPENROUTER_API_KEY"] = self.openrouter_api_key
+                
+                # Also set as OPENAI_API_KEY for fallback/compatibility
+                env["OPENAI_API_KEY"] = self.openrouter_api_key
             
-            # Set OpenRouter base URL for litellm
-            env["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
+            # Note: Do NOT set OPENAI_API_BASE when using openrouter/ prefix
+            # litellm handles the routing automatically based on model prefix
             
             # Add harbor to PATH
             home = os.path.expanduser("~")

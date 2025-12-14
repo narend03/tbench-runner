@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
     
-    # Default model
-    default_model: str = "openai/gpt-5.2"
+    # Default model (openrouter/ prefix for litellm compatibility)
+    default_model: str = "openrouter/openai/gpt-4o"
     
     # Task limits
     max_runs_per_task: int = 10
@@ -81,12 +81,15 @@ def get_settings() -> Settings:
 
 
 # Available models for selection (via OpenRouter)
+# Model IDs use openrouter/ prefix for litellm compatibility
 AVAILABLE_MODELS = [
-    {"id": "openai/gpt-5.2", "name": "GPT-5.2 (Recommended)", "provider": "OpenAI"},
-    {"id": "openai/gpt-5", "name": "GPT-5", "provider": "OpenAI"},
-    {"id": "openai/gpt-5-mini", "name": "GPT-5 Mini", "provider": "OpenAI"},
-    {"id": "openai/gpt-4o", "name": "GPT-4o", "provider": "OpenAI"},
-    {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "Anthropic"},
+    {"id": "openrouter/openai/gpt-5.2", "name": "GPT-5.2 (Latest)", "provider": "OpenAI"},
+    {"id": "openrouter/openai/gpt-4o", "name": "GPT-4o (Recommended)", "provider": "OpenAI"},
+    {"id": "openrouter/openai/gpt-4o-mini", "name": "GPT-4o Mini", "provider": "OpenAI"},
+    {"id": "openrouter/anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "Anthropic"},
+    {"id": "openrouter/anthropic/claude-3-haiku", "name": "Claude 3 Haiku (Fast)", "provider": "Anthropic"},
+    {"id": "openrouter/google/gemini-pro-1.5", "name": "Gemini Pro 1.5", "provider": "Google"},
+    {"id": "openrouter/meta-llama/llama-3.1-70b-instruct", "name": "Llama 3.1 70B", "provider": "Meta"},
 ]
 
 # Available agents/harnesses
