@@ -120,6 +120,17 @@ class HarborRunner:
             # Note: Do NOT set OPENAI_API_BASE when using openrouter/ prefix
             # litellm handles the routing automatically based on model prefix
             
+            # Drop unsupported parameters (fixes Claude/Bedrock cache_control issue)
+            env["LITELLM_DROP_PARAMS"] = "true"
+            
+            # Set request timeout for litellm (prevents hanging on slow/unresponsive APIs)
+            # 5 minutes per LLM request (Harbor makes multiple requests, total timeout is 20 min)
+            env["LITELLM_REQUEST_TIMEOUT"] = "300"
+            
+            # Additional litellm configuration for better error handling
+            env["LITELLM_LOG"] = "INFO"  # Enable logging for debugging
+            env["LITELLM_NUM_RETRIES"] = "2"  # Retry failed requests
+            
             # Add harbor to PATH
             home = os.path.expanduser("~")
             env["PATH"] = f"{home}/.local/bin:" + env.get("PATH", "")

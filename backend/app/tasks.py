@@ -14,7 +14,13 @@ from .cloudwatch_metrics import publish_queue_depth_metric
 settings = get_settings()
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=10,
+    time_limit=1500,  # Hard limit: 25 minutes (kills task if still running)
+    soft_time_limit=1200,  # Soft limit: 20 minutes (raises SoftTimeLimitExceeded)
+)
 def execute_harbor_run(
     self,
     task_id: int,

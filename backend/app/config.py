@@ -82,12 +82,11 @@ def get_settings() -> Settings:
 
 # Available models for selection (via OpenRouter)
 # Model IDs use openrouter/ prefix for litellm compatibility
+# Note: Claude models removed due to OpenRouter/Bedrock cache_control incompatibility
 AVAILABLE_MODELS = [
     {"id": "openrouter/openai/gpt-5.2", "name": "GPT-5.2 (Latest)", "provider": "OpenAI"},
     {"id": "openrouter/openai/gpt-4o", "name": "GPT-4o (Recommended)", "provider": "OpenAI"},
     {"id": "openrouter/openai/gpt-4o-mini", "name": "GPT-4o Mini", "provider": "OpenAI"},
-    {"id": "openrouter/anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "Anthropic"},
-    {"id": "openrouter/anthropic/claude-3-haiku", "name": "Claude 3 Haiku (Fast)", "provider": "Anthropic"},
     {"id": "openrouter/google/gemini-pro-1.5", "name": "Gemini Pro 1.5", "provider": "Google"},
     {"id": "openrouter/meta-llama/llama-3.1-70b-instruct", "name": "Llama 3.1 70B", "provider": "Meta"},
 ]
