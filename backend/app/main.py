@@ -20,6 +20,7 @@ from .models import (
 )
 from .harbor_runner import run_task_sync
 from .tasks import execute_harbor_run, execute_all_runs
+from .cloudwatch_metrics import publish_queue_depth_metric
 
 settings = get_settings()
 
@@ -50,7 +51,28 @@ async def startup():
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.jobs_dir).mkdir(parents=True, exist_ok=True)
     
+    # Start background task to publish queue metrics every 60 seconds
+    import asyncio
+    asyncio.create_task(publish_metrics_periodically())
+    
     print(f"🚀 TBench Runner started on http://{settings.host}:{settings.port}")
+
+
+async def publish_metrics_periodically():
+    """Background task to publish queue depth metrics every 60 seconds."""
+    import asyncio
+    while True:
+        try:
+            # Publish metrics (runs in thread pool since it's sync)
+            import concurrent.futures
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                await loop.run_in_executor(pool, publish_queue_depth_metric)
+        except Exception as e:
+            print(f"⚠️  Failed to publish metrics: {e}")
+        
+        # Wait 60 seconds before next publish
+        await asyncio.sleep(60)
 
 
 @app.get("/")

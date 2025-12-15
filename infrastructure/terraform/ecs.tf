@@ -206,7 +206,7 @@ resource "aws_ecs_service" "worker" {
 # Auto Scaling for Worker Tasks (ECS Service scaling)
 # Note: EC2 instance scaling is handled by the capacity provider
 resource "aws_appautoscaling_target" "worker" {
-  max_capacity       = 100  # Max Celery workers
+  max_capacity       = 200  # Max Celery workers (for 750 runs in <1 hour)
   min_capacity       = 2    # Minimum when idle
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.worker.name}"
   scalable_dimension = "ecs:service:DesiredCount"
@@ -215,6 +215,27 @@ resource "aws_appautoscaling_target" "worker" {
   depends_on = [aws_ecs_service.worker]
 }
 
+# Primary scaling policy: Queue depth (better for Celery workers)
+resource "aws_appautoscaling_policy" "worker_queue" {
+  name               = "${var.project_name}-worker-queue"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.worker.resource_id
+  scalable_dimension = aws_appautoscaling_target.worker.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.worker.service_namespace
+  
+  target_tracking_scaling_policy_configuration {
+    customized_metric_specification {
+      metric_name = "QueueDepth"
+      namespace   = "TBench/Celery"
+      statistic   = "Average"
+    }
+    target_value       = 5.0  # Target: 5 tasks per worker (scale up if >5, down if <5)
+    scale_in_cooldown  = 300  # Wait 5 min before scaling in
+    scale_out_cooldown = 60   # Wait 1 min before scaling out
+  }
+}
+
+# Backup scaling policy: CPU (safety net)
 resource "aws_appautoscaling_policy" "worker_cpu" {
   name               = "${var.project_name}-worker-cpu"
   policy_type        = "TargetTrackingScaling"
@@ -226,7 +247,7 @@ resource "aws_appautoscaling_policy" "worker_cpu" {
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
-    target_value       = 70.0
+    target_value       = 80.0  # Higher threshold (backup only)
     scale_in_cooldown  = 300
     scale_out_cooldown = 60
   }

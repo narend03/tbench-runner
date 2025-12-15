@@ -42,3 +42,11 @@ celery_app.conf.update(
 celery_app.conf.task_routes = {
     "app.tasks.execute_harbor_run": {"queue": "harbor"},
 }
+
+# Periodic tasks (Celery Beat) - publish queue metrics every 60 seconds
+celery_app.conf.beat_schedule = {
+    'publish-queue-metrics': {
+        'task': 'app.tasks.publish_queue_metrics',
+        'schedule': 60.0,  # Every 60 seconds
+    },
+}

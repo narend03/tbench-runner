@@ -366,6 +366,30 @@ resource "aws_iam_role_policy" "ecs_task_s3" {
   })
 }
 
+# IAM policy for CloudWatch metrics (queue depth publishing)
+resource "aws_iam_role_policy" "ecs_task_cloudwatch" {
+  name = "${var.project_name}-cloudwatch-metrics"
+  role = aws_iam_role.ecs_task.id
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "TBench/Celery"
+          }
+        }
+      }
+    ]
+  })
+}
+
 # ALB
 resource "aws_lb" "main" {
   name               = "${var.project_name}-alb"
