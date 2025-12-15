@@ -7,12 +7,14 @@ Total: 250 runs with GPT-5.2 + terminus-2
 import asyncio
 import aiohttp
 import time
+import os
 
 API_BASE = "http://tbench-runner-alb-1936777750.us-west-2.elb.amazonaws.com"
 ZIP_PATH = "sample-tasks/break-filter-js-from-html.zip"
 NUM_TABS = 25
 RUNS_PER_TAB = 10
-API_KEY = "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"
+# API Key - set via environment variable or replace with your key
+API_KEY = os.getenv("OPENROUTER_API_KEY", "YOUR_API_KEY_HERE")
 
 async def upload_task(session, tab_num):
     """Simulate one browser tab uploading and starting a task."""

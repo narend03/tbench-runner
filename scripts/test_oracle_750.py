@@ -7,6 +7,7 @@ This tests infrastructure without LLM costs.
 import asyncio
 import aiohttp
 import time
+import os
 
 API_BASE = "http://tbench-runner-alb-1936777750.us-west-2.elb.amazonaws.com"
 ZIP_PATH = "sample-tasks/break-filter-js-from-html.zip"
@@ -14,7 +15,8 @@ NUM_USERS = 15
 TASKS_PER_USER = 5
 RUNS_PER_TASK = 10
 TOTAL_RUNS = NUM_USERS * TASKS_PER_USER * RUNS_PER_TASK
-API_KEY = "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"
+# API Key - set via environment variable or replace with your key
+API_KEY = os.getenv("OPENROUTER_API_KEY", "YOUR_API_KEY_HERE")
 
 async def upload_and_start_task(session, user_num, task_num):
     """Upload a task and start execution with oracle agent."""
